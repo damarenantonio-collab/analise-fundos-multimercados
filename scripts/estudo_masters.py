@@ -12,8 +12,19 @@ Saídas em data/processed/:
     retorno_historico_masters.csv - métricas de cada master desde o início
     series_masters.csv            - série diária de retorno acumulado de cada master
 
-Pode demorar: para fundos com muitos anos de histórico, busca um arquivo por
-mês na CVM (com cache local em data/raw/, então reexecuções são rápidas).
+Pode demorar bastante na primeira vez: para achar o início real de cada
+master, busca um arquivo por mês na CVM desde 2000 (todos os fundos deste
+estudo são mais novos que isso) até hoje - ~300 meses, mas cada mês é
+baixado uma única vez e reaproveitado por todos os fundos (cache local em
+data/raw/), então reexecuções e outros fundos no mesmo período são rápidos.
+
+Por que não usamos a data de início do cadastro da CVM: os fundos master
+(por trás dos FICs do catálogo) nem sempre aparecem em `cad_fi.csv` com o
+mesmo CNPJ - a reforma de fundos estruturados em classes (Instrução CVM 175)
+reorganizou como alguns desses masters são registrados. Em vez de depender
+disso, buscamos o intervalo inteiro e usamos a primeira cota que realmente
+existir como data de início - mais lento, porém correto independentemente de
+como o master está cadastrado.
 """
 from __future__ import annotations
 
@@ -26,11 +37,15 @@ import pandas as pd  # noqa: E402
 
 from fundos.benchmarks import cdi_diario  # noqa: E402
 from fundos.catalogo import carregar_catalogo  # noqa: E402
-from fundos.cvm import data_inicio_atividade, fetch_cadastro, fetch_serie_historica  # noqa: E402
+from fundos.cvm import fetch_serie_historica  # noqa: E402
 from fundos.master import identificar_masters_catalogo  # noqa: E402
 from fundos.metrics import resumo, retorno_acumulado, retornos_diarios  # noqa: E402
 
 PROCESSED_DIR = Path(__file__).resolve().parents[1] / "data" / "processed"
+
+# Nenhum fundo multimercado brasileiro deste catálogo é mais antigo que isso;
+# usado como piso da busca quando não sabemos a data real de início do master.
+DATA_MINIMA_BUSCA = "2000-01-01"
 
 
 def main() -> None:
@@ -51,32 +66,33 @@ def main() -> None:
     if encontrados.empty:
         return
 
-    print("\nBaixando cadastro da CVM (para a data de início de cada master)...")
-    cadastro = fetch_cadastro()
+    print(
+        f"\nBuscando histórico de {encontrados['cnpj_master'].nunique()} masters "
+        f"desde {DATA_MINIMA_BUSCA} (pode demorar bastante na primeira vez)..."
+    )
 
     resultados = []
     series = []
     for _, linha in encontrados.drop_duplicates("cnpj_master").iterrows():
         cnpj_master = linha["cnpj_master"]
         nome_master = linha["nome_master"]
-        inicio = data_inicio_atividade(cadastro, cnpj_master)
-        if inicio is None:
-            print(f"  aviso: sem data de início cadastrada para {nome_master} ({cnpj_master}); pulando")
-            continue
 
-        print(f"  {nome_master}: histórico desde {inicio.date()}...")
-        cotas = fetch_serie_historica(cnpj_master, str(inicio.date()))
+        print(f"  {nome_master}: buscando desde {DATA_MINIMA_BUSCA}...")
+        cotas = fetch_serie_historica(cnpj_master, DATA_MINIMA_BUSCA)
         if cotas.empty:
             print("    sem cotas retornadas; pulando")
             continue
 
-        cdi = cdi_diario(str(inicio.date()), str(cotas.index.max().date()))
+        inicio_real = cotas.index.min()
+        print(f"    primeira cota encontrada em {inicio_real.date()} ({len(cotas)} cotações)")
+
+        cdi = cdi_diario(str(inicio_real.date()), str(cotas.index.max().date()))
         metricas = resumo(cotas, retornos_livre_risco=cdi)
         resultados.append(
             {
                 "cnpj_master": cnpj_master,
                 "nome_master": nome_master,
-                "data_inicio": inicio.date(),
+                "data_inicio": inicio_real.date(),
                 "data_ultima_cota": cotas.index.max().date(),
                 "n_dias_uteis": len(cotas) - 1,
                 **metricas,

@@ -148,16 +148,20 @@ O script:
 1. Para cada um dos 27 fundos, identifica o CNPJ do master via CDA (últimos
    6 meses disponíveis, já que a CVM publica a CDA com 1-2 meses de atraso)
    → `data/processed/masters.csv`.
-2. Busca a data de início de atividade de cada master no cadastro da CVM.
-3. Baixa a série completa de cotas do master desde essa data (pode ser
-   10-20 anos) e calcula retorno total, retorno anualizado, volatilidade,
-   Sharpe (vs. CDI) e max drawdown → `data/processed/retorno_historico_masters.csv`.
-4. Salva a série diária de retorno acumulado de cada master →
+2. Baixa a série completa de cotas de cada master desde 2000 até hoje e usa a
+   primeira cota que existir como data de início real (não confiamos na data
+   de início do cadastro da CVM — os masters por trás dos FICs nem sempre
+   aparecem em `cad_fi.csv` com o mesmo CNPJ, provavelmente por causa da
+   reforma de fundos estruturados em classes). Calcula retorno total, retorno
+   anualizado, volatilidade, Sharpe (vs. CDI) e max drawdown →
+   `data/processed/retorno_historico_masters.csv`.
+3. Salva a série diária de retorno acumulado de cada master →
    `data/processed/series_masters.csv` (para plotar depois).
 
-Roda localmente ou em CI com rede liberada (ver aviso acima) — com o
-universo de 27 fundos, espera baixar algumas centenas de arquivos mensais no
-total; execuções seguintes reaproveitam o cache em `data/raw/`.
+Roda localmente ou em CI com rede liberada (ver aviso acima). Na primeira
+execução busca ~300 arquivos mensais (2000 até hoje) — demora, mas cada mês é
+baixado uma única vez e reaproveitado por todos os 27 fundos (cache em
+`data/raw/`); reexecuções são rápidas.
 
 > A CVM já mudou nomes de coluna (`CNPJ_FUNDO` → `CNPJ_FUNDO_CLASSE`) e o
 > layout de alguns arquivos ao longo dos anos. `fundos.cvm` e `fundos.master`
