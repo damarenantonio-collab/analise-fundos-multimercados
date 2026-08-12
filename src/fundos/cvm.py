@@ -2,17 +2,20 @@
 
 Fonte: Portal de Dados Abertos da CVM (https://dados.cvm.gov.br).
 - Cadastro de fundos: um CSV único com todos os fundos registrados.
-- Informe diário: um CSV por mês com a cota/patrimônio diário de TODOS os
-  fundos registrados naquele mês. Apenas os últimos meses ficam disponíveis
-  como CSV solto; períodos mais antigos são publicados em ZIPs anuais na
-  subpasta `HIST/` (mesmo schema, um CSV por mês dentro do ZIP). As funções
-  aqui tentam primeiro o CSV solto e caem para o ZIP anual automaticamente.
+- Informe diário: um ZIP por mês (ex.: `inf_diario_fi_202608.zip`), contendo
+  um CSV com a cota/patrimônio diário de TODOS os fundos registrados naquele
+  mês. Confirmado em 2026-08 via listagem real de
+  `dados.cvm.gov.br/dados/FI/DOC/INF_DIARIO/DADOS/` — não há mais CSV solto
+  nem subpasta `HIST/` separada; é um ZIP por mês desde sempre nessa pasta.
 
-Atenção: a CVM alterou alguns nomes de coluna ao longo do tempo (ex.:
+Atenção: a CVM já mudou esse layout antes (também mudou nomes de coluna, ex.:
 `CNPJ_FUNDO` -> `CNPJ_FUNDO_CLASSE` para fundos estruturados em classes desde
-a reforma de 2023). As funções abaixo detectam a coluna correta dinamicamente
-via `coluna_cnpj_fundo`; se a CVM mudar novamente o layout, ajuste as
-constantes/candidatas no topo deste arquivo.
+a reforma de 2023) e pode mudar de novo. `fetch_informe_diario` tenta o ZIP
+mensal primeiro e cai para um CSV solto como segunda tentativa; se a CVM
+mudar o layout outra vez, confira a listagem em
+`dados.cvm.gov.br/dados/FI/DOC/INF_DIARIO/DADOS/` e ajuste as constantes
+abaixo. As colunas de CNPJ são detectadas dinamicamente via
+`coluna_cnpj_fundo`.
 """
 from __future__ import annotations
 
@@ -25,8 +28,8 @@ import requests
 CADASTRO_URL = "https://dados.cvm.gov.br/dados/FI/CAD/DADOS/cad_fi.csv"
 
 _BASE_INF_DIARIO = "https://dados.cvm.gov.br/dados/FI/DOC/INF_DIARIO/DADOS"
-INFORME_DIARIO_URL_TEMPLATE = f"{_BASE_INF_DIARIO}/inf_diario_fi_{{yyyymm}}.csv"
-INFORME_DIARIO_HIST_URL_TEMPLATE = f"{_BASE_INF_DIARIO}/HIST/inf_diario_fi_{{ano}}.zip"
+INFORME_DIARIO_ZIP_URL_TEMPLATE = f"{_BASE_INF_DIARIO}/inf_diario_fi_{{yyyymm}}.zip"
+INFORME_DIARIO_CSV_URL_TEMPLATE = f"{_BASE_INF_DIARIO}/inf_diario_fi_{{yyyymm}}.csv"
 
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "raw"
 
@@ -116,26 +119,24 @@ def fetch_informe_diario(
 ) -> pd.DataFrame:
     """Baixa (com cache) e carrega o informe diário de um mês (ex.: "2026-07").
 
-    Tenta primeiro o CSV mensal solto; se a CVM já tiver movido esse mês para
-    o arquivo histórico anual (`HIST/inf_diario_fi_{ano}.zip`), cai para ele
-    automaticamente.
+    Tenta primeiro o ZIP mensal (formato atual da CVM, confirmado 2026-08);
+    se não encontrar, tenta um CSV solto como segunda opção (formato antigo).
 
     Retorna as cotas diárias de TODOS os fundos registrados na CVM naquele
     mês. Filtre pelo CNPJ desejado depois de carregar (veja `cotas_do_fundo`).
     """
     yyyymm = ano_mes.replace("-", "")[:6]
-    ano = yyyymm[:4]
     cache_dir = Path(cache_dir)
     destino = cache_dir / f"inf_diario_fi_{yyyymm}.csv"
     if forcar_download and destino.exists():
         destino.unlink()
     if not destino.exists():
         try:
-            _baixar_arquivo(INFORME_DIARIO_URL_TEMPLATE.format(yyyymm=yyyymm), destino)
-        except FileNotFoundError:
-            zip_destino = cache_dir / f"inf_diario_fi_{ano}.zip"
-            _baixar_arquivo(INFORME_DIARIO_HIST_URL_TEMPLATE.format(ano=ano), zip_destino)
+            zip_destino = cache_dir / f"inf_diario_fi_{yyyymm}.zip"
+            _baixar_arquivo(INFORME_DIARIO_ZIP_URL_TEMPLATE.format(yyyymm=yyyymm), zip_destino)
             _extrair_do_zip(zip_destino, f"inf_diario_fi_{yyyymm}.csv", destino)
+        except FileNotFoundError:
+            _baixar_arquivo(INFORME_DIARIO_CSV_URL_TEMPLATE.format(yyyymm=yyyymm), destino)
     df = pd.read_csv(destino, sep=";", encoding="latin-1", low_memory=False)
     df["DT_COMPTC"] = pd.to_datetime(df["DT_COMPTC"])
     return df

@@ -79,8 +79,7 @@ Os arquivos baixados ficam em cache local (`data/raw/`) para não re-baixar a
 cada execução. Para séries longas (vários anos), use
 `fetch_serie_historica(cnpj, data_inicio)` em vez de `fetch_informe_diario` +
 `cotas_do_fundo` — ela filtra por CNPJ mês a mês em vez de carregar o universo
-inteiro de fundos de cada mês em memória, e cai automaticamente para os ZIPs
-anuais (`HIST/`) quando o mês pedido não está mais disponível como CSV solto.
+inteiro de fundos de cada mês em memória.
 
 ### 2. Planilhas próprias
 

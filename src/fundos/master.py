@@ -8,9 +8,11 @@ histórico real da estratégia. Este módulo lê o bloco 2 da CDA
 (`cda_fi_BLC_2`, "Cotas de Fundos de Investimento") e, para cada feeder,
 escolhe como master a posição em cotas de maior valor de mercado.
 
-Assim como o informe diário, a CDA recente é publicada como CSV solto por
-mês; períodos mais antigos ficam em ZIPs anuais na subpasta `HIST/`. A CVM
-também costuma levar 1-2 meses para publicar a CDA mais recente, então
+A CDA é publicada como um ZIP por mês (ex.: `cda_fi_202606.zip`), contendo
+vários CSVs dentro — um por bloco de tipo de ativo (`cda_fi_BLC_1_...csv`
+títulos públicos, `cda_fi_BLC_2_...csv` cotas de fundos, etc.) — confirmado
+em 2026-08 via listagem real de `dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS/`.
+A CVM também costuma levar 1-2 meses para publicar a CDA mais recente, então
 `identificar_master` tenta, por padrão, os últimos 6 meses antes de desistir.
 """
 from __future__ import annotations
@@ -29,8 +31,7 @@ from .cvm import (
 )
 
 _BASE_CDA = "https://dados.cvm.gov.br/dados/FI/DOC/CDA/DADOS"
-CDA_BLC2_URL_TEMPLATE = f"{_BASE_CDA}/cda_fi_BLC_2_{{yyyymm}}.csv"
-CDA_HIST_URL_TEMPLATE = f"{_BASE_CDA}/HIST/cda_fi_{{ano}}.zip"
+CDA_ZIP_URL_TEMPLATE = f"{_BASE_CDA}/cda_fi_{{yyyymm}}.zip"
 
 # Nomes possíveis para as colunas de CNPJ/nome do fundo INVESTIDO (a cota que
 # o feeder carrega), em ordem de preferência.
@@ -48,18 +49,15 @@ def _coluna(df: pd.DataFrame, candidatas: tuple[str, ...], obrigatoria: bool = T
 
 
 def _baixar_cda_blc2(ano_mes: str, cache_dir: Path | str = DEFAULT_CACHE_DIR) -> pd.DataFrame:
-    """Baixa (com cache) e carrega o bloco 2 da CDA (cotas de fundos) de um mês."""
+    """Baixa (com cache) o ZIP mensal da CDA e carrega o bloco 2 (cotas de
+    fundos) de dentro dele."""
     yyyymm = ano_mes.replace("-", "")[:6]
-    ano = yyyymm[:4]
     cache_dir = Path(cache_dir)
     destino = cache_dir / f"cda_fi_BLC_2_{yyyymm}.csv"
     if not destino.exists():
-        try:
-            _baixar_arquivo(CDA_BLC2_URL_TEMPLATE.format(yyyymm=yyyymm), destino)
-        except FileNotFoundError:
-            zip_destino = cache_dir / f"cda_fi_{ano}.zip"
-            _baixar_arquivo(CDA_HIST_URL_TEMPLATE.format(ano=ano), zip_destino)
-            _extrair_do_zip(zip_destino, f"cda_fi_BLC_2_{yyyymm}.csv", destino)
+        zip_destino = cache_dir / f"cda_fi_{yyyymm}.zip"
+        _baixar_arquivo(CDA_ZIP_URL_TEMPLATE.format(yyyymm=yyyymm), zip_destino)
+        _extrair_do_zip(zip_destino, f"cda_fi_BLC_2_{yyyymm}.csv", destino)
     return pd.read_csv(destino, sep=";", encoding="latin-1", low_memory=False)
 
 
