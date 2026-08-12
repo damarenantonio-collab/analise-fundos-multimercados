@@ -8,16 +8,44 @@ risco/retorno e compara com benchmarks (CDI, IPCA).
 
 ```
 src/fundos/
+  catalogo.py     # carrega o universo de fundos do estudo (data/catalogo_fundos_multimercados.xlsx)
   cvm.py          # download/parse de dados públicos da CVM (informe diário + cadastro)
   benchmarks.py   # séries de CDI e IPCA via API do Banco Central (SGS)
   loaders.py      # leitura de planilhas próprias (CSV/XLSX) de cotas de fundos
   metrics.py       # retorno, volatilidade, Sharpe, drawdown, correlação
 notebooks/         # exploração interativa
+  01_exploracao.ipynb    # fluxo geral: CVM -> métricas -> comparação com CDI
+  02_catalogo_btg.ipynb  # rankings do catálogo + cruzamento com CVM para o top N
 examples/           # modelo de planilha para carteira própria
 tests/               # testes das funções de métricas e carregamento
-data/raw/           # cache de dados baixados (não versionado)
-data/processed/     # saídas processadas (não versionado)
+data/
+  catalogo_fundos_multimercados.xlsx  # universo de 27 fundos multimercados do estudo (versionado)
+  raw/           # cache de dados baixados da CVM/BCB (não versionado)
+  processed/     # saídas processadas (não versionado)
 ```
+
+## Universo do estudo
+
+`data/catalogo_fundos_multimercados.xlsx` traz os 27 fundos multimercados que
+usamos como base da análise (CNPJ, gestora, classificação Anbima/CVM, taxas e
+métricas de performance de 12/24/36 meses já calculadas pela distribuidora).
+
+```python
+from fundos.catalogo import carregar_catalogo, ranking, resumo_por_gestora
+
+catalogo = carregar_catalogo()
+ranking(catalogo, "sharpe_12m", top_n=10)        # melhores Sharpe 12M
+ranking(catalogo, "volatilidade_12m", ascendente=True)  # menos voláteis
+resumo_por_gestora(catalogo)                      # patrimônio/retorno por gestora
+```
+
+Os CNPJs do catálogo servem de ponte para os dados diários da CVM
+(`fundos.cvm`), permitindo recalcular as métricas de forma independente e
+analisar séries históricas completas — veja `notebooks/02_catalogo_btg.ipynb`.
+
+> `fundos.cvm` e `fundos.benchmarks` precisam de acesso a `dados.cvm.gov.br`
+> e `api.bcb.gov.br`. Em ambientes com rede restrita (sandboxes, alguns CI)
+> essas chamadas podem falhar — rode localmente ou em CI com rede liberada.
 
 ## Setup
 
