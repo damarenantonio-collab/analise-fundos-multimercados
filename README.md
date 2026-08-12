@@ -9,10 +9,13 @@ risco/retorno e compara com benchmarks (CDI, IPCA).
 ```
 src/fundos/
   catalogo.py     # carrega o universo de fundos do estudo (data/catalogo_fundos_multimercados.xlsx)
-  cvm.py          # download/parse de dados públicos da CVM (informe diário + cadastro)
+  cvm.py          # download/parse de dados públicos da CVM (cadastro, informe diário, série histórica)
+  master.py       # identifica o fundo master de cada feeder via CDA (composição da carteira) da CVM
   benchmarks.py   # séries de CDI e IPCA via API do Banco Central (SGS)
   loaders.py      # leitura de planilhas próprias (CSV/XLSX) de cotas de fundos
   metrics.py       # retorno, volatilidade, Sharpe, drawdown, correlação
+scripts/
+  estudo_masters.py  # identifica os masters do catálogo e calcula o retorno de cada um desde o início
 notebooks/         # exploração interativa
   01_exploracao.ipynb    # fluxo geral: CVM -> métricas -> comparação com CDI
   02_catalogo_btg.ipynb  # rankings do catálogo + cruzamento com CVM para o top N
@@ -21,7 +24,7 @@ tests/               # testes das funções de métricas e carregamento
 data/
   catalogo_fundos_multimercados.xlsx  # universo de 27 fundos multimercados do estudo (versionado)
   raw/           # cache de dados baixados da CVM/BCB (não versionado)
-  processed/     # saídas processadas (não versionado)
+  processed/     # saídas processadas: masters.csv, retorno_historico_masters.csv, series_masters.csv (não versionado)
 ```
 
 ## Universo do estudo
@@ -63,17 +66,21 @@ pip install -e .
 A CVM publica diariamente as cotas de todos os fundos registrados no Brasil.
 
 ```python
-from fundos.cvm import fetch_cadastro, fetch_informe_diario, filtrar_multimercados
+from fundos.cvm import fetch_cadastro, fetch_informe_diario, filtrar_multimercados, cotas_do_fundo
 
 cadastro = fetch_cadastro()                       # cadastro completo de fundos (CNPJ, nome, classe...)
 multimercados = filtrar_multimercados(cadastro)    # apenas fundos classe "Fundo Multimercado"
 
 informe = fetch_informe_diario("2026-07")           # cotas diárias de TODOS os fundos em jul/2026
-cotas_fundo = informe[informe["CNPJ_FUNDO"] == "00.000.000/0001-00"]
+cotas_fundo = cotas_do_fundo(informe, "00.000.000/0001-00")
 ```
 
 Os arquivos baixados ficam em cache local (`data/raw/`) para não re-baixar a
-cada execução.
+cada execução. Para séries longas (vários anos), use
+`fetch_serie_historica(cnpj, data_inicio)` em vez de `fetch_informe_diario` +
+`cotas_do_fundo` — ela filtra por CNPJ mês a mês em vez de carregar o universo
+inteiro de fundos de cada mês em memória, e cai automaticamente para os ZIPs
+anuais (`HIST/`) quando o mês pedido não está mais disponível como CSV solto.
 
 ### 2. Planilhas próprias
 
@@ -120,6 +127,45 @@ ipca = ipca_mensal("2026-01-01", "2026-07-31")
 ```
 
 Use o CDI diário como taxa livre de risco no `indice_sharpe(retornos, cdi)`.
+
+## Fundo master e histórico desde o início
+
+A maioria dos 27 fundos do catálogo é um **feeder** (FIC — Fundo de
+Investimento em Cotas): aplica quase 100% do patrimônio num único fundo
+**master**, que é quem de fato executa a estratégia. Para estudar o
+histórico real de cada estratégia (não só os últimos 12-36 meses que o
+catálogo já traz), é o master que precisa ser analisado, desde o início dele
+— que costuma ser bem anterior ao início do feeder correspondente.
+
+`fundos.master` identifica o master de cada feeder lendo a **Composição da
+Carteira (CDA)** que a CVM publica mensalmente: para cada fundo, olha o
+bloco "cotas de fundos" e escolhe a posição de maior valor de mercado.
+
+```bash
+python scripts/estudo_masters.py
+```
+
+O script:
+1. Para cada um dos 27 fundos, identifica o CNPJ do master via CDA (últimos
+   6 meses disponíveis, já que a CVM publica a CDA com 1-2 meses de atraso)
+   → `data/processed/masters.csv`.
+2. Busca a data de início de atividade de cada master no cadastro da CVM.
+3. Baixa a série completa de cotas do master desde essa data (pode ser
+   10-20 anos) e calcula retorno total, retorno anualizado, volatilidade,
+   Sharpe (vs. CDI) e max drawdown → `data/processed/retorno_historico_masters.csv`.
+4. Salva a série diária de retorno acumulado de cada master →
+   `data/processed/series_masters.csv` (para plotar depois).
+
+Roda localmente ou em CI com rede liberada (ver aviso acima) — com o
+universo de 27 fundos, espera baixar algumas centenas de arquivos mensais no
+total; execuções seguintes reaproveitam o cache em `data/raw/`.
+
+> A CVM já mudou nomes de coluna (`CNPJ_FUNDO` → `CNPJ_FUNDO_CLASSE`) e o
+> layout de alguns arquivos ao longo dos anos. `fundos.cvm` e `fundos.master`
+> detectam a coluna certa dinamicamente, mas se a CVM mudar de novo e o
+> script falhar com `KeyError`/`FileNotFoundError`, confira a listagem atual
+> em `dados.cvm.gov.br/dados/FI/DOC/` e ajuste as constantes no topo de
+> `cvm.py`/`master.py`.
 
 ## Notebook de exemplo
 
