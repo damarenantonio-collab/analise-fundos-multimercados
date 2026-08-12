@@ -45,12 +45,15 @@ CANDIDATAS_COLUNA_DATA_INICIO = ("DT_INI_ATIV", "DT_REG")
 
 def _baixar_arquivo(url: str, destino: Path, timeout: int = 60) -> Path:
     """Baixa `url` para `destino` (com cache: não baixa de novo se já existe).
-    Levanta `FileNotFoundError` em 404, para permitir fallback para outra URL."""
+    Levanta `FileNotFoundError` em 404 OU 403, para permitir fallback para
+    outra URL. No portal de dados da CVM (público, sem autenticação), 403
+    aparece na prática para caminhos/meses que nunca existiram (mais antigos
+    que o início da série publicada) - não é um bloqueio de acesso real."""
     destino.parent.mkdir(parents=True, exist_ok=True)
     if destino.exists():
         return destino
     resposta = requests.get(url, timeout=timeout)
-    if resposta.status_code == 404:
+    if resposta.status_code in (404, 403):
         raise FileNotFoundError(url)
     resposta.raise_for_status()
     destino.write_bytes(resposta.content)
@@ -122,21 +125,36 @@ def fetch_informe_diario(
     Tenta primeiro o ZIP mensal (formato atual da CVM, confirmado 2026-08);
     se não encontrar, tenta um CSV solto como segunda opção (formato antigo).
 
+    Meses sem dados publicados (ex.: anteriores ao início da série da CVM)
+    ficam marcados em cache (`.notfound`) para não tentar baixar de novo em
+    execuções futuras - importante ao varrer 20+ anos para vários fundos.
+
     Retorna as cotas diárias de TODOS os fundos registrados na CVM naquele
     mês. Filtre pelo CNPJ desejado depois de carregar (veja `cotas_do_fundo`).
     """
     yyyymm = ano_mes.replace("-", "")[:6]
     cache_dir = Path(cache_dir)
     destino = cache_dir / f"inf_diario_fi_{yyyymm}.csv"
-    if forcar_download and destino.exists():
-        destino.unlink()
+    marcador_ausente = cache_dir / f"inf_diario_fi_{yyyymm}.notfound"
+    if forcar_download:
+        if destino.exists():
+            destino.unlink()
+        if marcador_ausente.exists():
+            marcador_ausente.unlink()
+    if marcador_ausente.exists():
+        raise FileNotFoundError(f"informe diário de {ano_mes} não existe na CVM (marcado em cache anterior)")
     if not destino.exists():
         try:
             zip_destino = cache_dir / f"inf_diario_fi_{yyyymm}.zip"
             _baixar_arquivo(INFORME_DIARIO_ZIP_URL_TEMPLATE.format(yyyymm=yyyymm), zip_destino)
             _extrair_do_zip(zip_destino, f"inf_diario_fi_{yyyymm}.csv", destino)
         except FileNotFoundError:
-            _baixar_arquivo(INFORME_DIARIO_CSV_URL_TEMPLATE.format(yyyymm=yyyymm), destino)
+            try:
+                _baixar_arquivo(INFORME_DIARIO_CSV_URL_TEMPLATE.format(yyyymm=yyyymm), destino)
+            except FileNotFoundError:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                marcador_ausente.write_text("")
+                raise
     df = pd.read_csv(destino, sep=";", encoding="latin-1", low_memory=False)
     df["DT_COMPTC"] = pd.to_datetime(df["DT_COMPTC"])
     return df
